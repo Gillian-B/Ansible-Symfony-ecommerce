@@ -4,4 +4,4 @@ connect throught ssh to approve connection (not necessary if connection via host
 
 modify ip inside hosts file
 
-modify ip inside nginx config file
+modify ip inside nginx config file (ecommerce)
