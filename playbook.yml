@@ -1,0 +1,129 @@
+---
+- hosts: php
+  sudo: yes
+
+  tasks:
+
+  - name: setup php 7.4
+    apt: name={{ item }}
+    with_items:
+     - lsb-release
+     - apt-transport-https
+     - ca-certificates
+     - wget
+ 
+  - name: setup php 7.4 p2  
+    get_url:
+      url: https://packages.sury.org/php/apt.gpg
+      dest: /etc/apt/trusted.gpg.d/php.gpg
+      mode: 0644
+ 
+  - name: setup php 7.4 p3
+    lineinfile:
+      path: /etc/apt/sources.list.d/php.list
+      line: 'deb https://packages.sury.org/php/ buster main'
+      create: yes  
+
+  - name: setup php 7.4 p4
+    apt:
+      update_cache: yes  
+
+  - name: install packages
+    apt: name={{ item }} force=yes
+    with_items:
+     - php7.4-fpm
+     - php7.4-xml
+     - php7.4-zip
+     - php7.4-mysql
+     - nginx
+     - git
+     - mariadb-server
+     - curl
+     - python-pip
+
+  - name: Clone git repository
+    git: >
+      dest=/var/www/ecommerce
+      repo=https://github.com/Gillian-B/Symfony-ecommerce.git
+      update=no
+    sudo: yes
+
+  - name: change ownership
+    file:
+      path: /var/www/ecommerce
+      owner: gillian
+      group: gillian
+
+  - name: install composer
+    shell: curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
+    args:
+      creates: /usr/local/bin/composer
+
+  - name: edit env
+    lineinfile:
+      dest: /var/www/ecommerce/.env
+      regexp: "{{  item.regexp  }}" 
+      line: "{{  item.line  }}"
+    with_items:
+     - { regexp: '^DATABASE_URL=', line: 'DATABASE_URL="mysql://gillian:password@127.0.0.1:3306/ecommerce?serverVersion=mariadb-10.3.27"' }
+     - { regexp: '^APP_ENV=', line: 'APP_ENV=prod' }
+     - { regexp: '^APP_DEBUG=', line: 'APP_DEBUG=0' }   
+  
+  - name: export APP_ENV
+    shell: export APP_ENV=prod  
+
+  - name: install dependencies
+    composer:
+      command: install
+      working_dir: /var/www/ecommerce/ 
+    sudo: no
+
+  - name: install pymysql
+    pip:
+      name: PyMySQL==0.10.1
+
+  - name: check is mysql user exist
+    mysql_user:
+      login_unix_socket: /var/run/mysqld/mysqld.sock
+      name: gillian
+      state: absent
+
+  - name: create mysql user
+    mysql_user:
+      login_unix_socket: /var/run/mysqld/mysqld.sock
+      name: gillian
+      password: password
+      priv: '*.*:ALL'
+      state: present
+
+  - name: create db
+    shell: php bin/console doctrine:database:create --if-not-exists
+    sudo: no
+    args:
+      chdir: /var/www/ecommerce/
+  
+  - name: create tables
+    shell: php bin/console doctrine:migrations:migrate --no-interaction
+    sudo: no
+    args:
+      chdir: /var/www/ecommerce/
+
+  - name: send nginx config file
+    copy:
+      src: /home/gillian/ansible-ecommerce/ecommerce
+      dest: /etc/nginx/sites-available/ecommerce
+
+  - name: nginx config symbolic link
+    file:
+      src: /etc/nginx/sites-available/ecommerce
+      dest: /etc/nginx/sites-enabled/ecommerce
+      state: link
+  
+  - name: clear symfony cache
+    shell: php bin/console cache:clear
+    sudo: no
+    args:
+      chdir: /var/www/ecommerce/
+
+  - name: reload nginx
+    shell: systemctl reload nginx
